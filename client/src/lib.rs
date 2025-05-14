@@ -1,9 +1,16 @@
 mod models;
+mod cache;
 #[cfg(test)]
 mod tests;
 
 pub use models::{CurrencyCode, ExchangeRateResponse};
+pub use cache::{CacheBackend, CacheConfig, CachedResponse, InMemoryCache};
 
+#[cfg(feature = "sqlite-cache")]
+pub use cache::sqlite::SqliteCache;
+
+use cache::create_cache_key;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -56,6 +63,10 @@ pub enum ExchangeRateError {
 
     #[error("JSON parsing error: {0}")]
     JsonError(#[from] serde_json::Error),
+    
+    /// A cache error occurred
+    #[error("Cache error: {0}")]
+    CacheError(#[from] cache::CacheError),
 }
 
 /// # Exchange Rate API Client
@@ -82,7 +93,7 @@ pub enum ExchangeRateError {
 ///
 /// ## Example
 ///
-/// ```rust,no_run
+/// ```no_run
 /// use client::{ExchangeRateClient, AuthMethod};
 ///
 /// #[tokio::main]
@@ -107,6 +118,8 @@ pub struct ExchangeRateClient {
     base_url: String,
     auth_method: AuthMethod,
     http_client: reqwest::Client,
+    cache: Option<Arc<dyn CacheBackend>>,
+    cache_config: CacheConfig,
 }
 
 /// Builder for creating an `ExchangeRateClient` with custom configuration
@@ -115,6 +128,8 @@ pub struct ExchangeRateClientBuilder {
     base_url: Option<String>,
     auth_method: AuthMethod,
     timeout: Option<Duration>,
+    cache: Option<Arc<dyn CacheBackend>>,
+    cache_config: CacheConfig,
 }
 
 impl Default for ExchangeRateClientBuilder {
@@ -132,6 +147,8 @@ impl ExchangeRateClientBuilder {
             base_url: Some("https://v6.exchangerate-api.com/v6".to_string()),
             auth_method: AuthMethod::BearerToken, // Default to more secure method
             timeout: Some(Duration::from_secs(30)),
+            cache: None,
+            cache_config: CacheConfig::default(),
         }
     }
 
@@ -162,6 +179,70 @@ impl ExchangeRateClientBuilder {
         self.timeout = Some(timeout);
         self
     }
+    
+    /// Set a cache backend for the client
+    /// 
+    /// # Examples
+    /// 
+    /// ```no_run
+    /// use client::{ExchangeRateClient, InMemoryCache};
+    /// use std::sync::Arc;
+    /// 
+    /// let client = ExchangeRateClient::builder()
+    ///     .api_key("your-api-key")
+    ///     .with_cache(Arc::new(InMemoryCache::new()))
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[must_use]
+    pub fn with_cache(mut self, cache: Arc<dyn CacheBackend>) -> Self {
+        self.cache = Some(cache);
+        self
+    }
+    
+    /// Set cache configuration options
+    /// 
+    /// # Examples
+    /// 
+    /// ```no_run
+    /// use client::{ExchangeRateClient, CacheConfig};
+    /// use chrono::Duration;
+    /// 
+    /// let cache_config = CacheConfig {
+    ///     enabled: true,
+    ///     default_ttl: Duration::hours(12),
+    /// };
+    /// 
+    /// let client = ExchangeRateClient::builder()
+    ///     .api_key("your-api-key")
+    ///     .cache_config(cache_config)
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[must_use]
+    pub fn cache_config(mut self, config: CacheConfig) -> Self {
+        self.cache_config = config;
+        self
+    }
+    
+    /// Disable caching
+    /// 
+    /// # Examples
+    /// 
+    /// ```no_run
+    /// use client::ExchangeRateClient;
+    /// 
+    /// let client = ExchangeRateClient::builder()
+    ///     .api_key("your-api-key")
+    ///     .disable_cache()
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[must_use]
+    pub fn disable_cache(mut self) -> Self {
+        self.cache_config.enabled = false;
+        self
+    }
 
     /// Build the client with the configured settings
     ///
@@ -181,6 +262,26 @@ impl ExchangeRateClientBuilder {
             .build()
             .map_err(ExchangeRateError::HttpClientError)?;
 
+        // Set up default in-memory cache if caching is enabled but no cache backend was provided
+        let cache = if self.cache_config.enabled {
+            match self.cache {
+                Some(cache) => Some(cache),
+                None => {
+                    #[cfg(feature = "in-memory-cache")]
+                    {
+                        Some(Arc::new(InMemoryCache::new()) as Arc<dyn CacheBackend>)
+                    }
+                    
+                    #[cfg(not(feature = "in-memory-cache"))]
+                    {
+                        None
+                    }
+                }
+            }
+        } else {
+            None
+        };
+        
         Ok(ExchangeRateClient {
             api_key,
             base_url: self
@@ -188,6 +289,8 @@ impl ExchangeRateClientBuilder {
                 .unwrap_or_else(|| "https://v6.exchangerate-api.com/v6".to_string()),
             auth_method: self.auth_method,
             http_client,
+            cache,
+            cache_config: self.cache_config,
         })
     }
 }
@@ -229,6 +332,29 @@ impl ExchangeRateClient {
         &self,
         base_code: &str,
     ) -> Result<ExchangeRateResponse, ExchangeRateError> {
+        // Create a cache key for this request
+        let cache_key = create_cache_key("latest", &[base_code]);
+        
+        // Try to get from cache first if caching is enabled
+        if self.cache_config.enabled {
+            if let Some(cache) = &self.cache {
+                match cache.get_exchange_rate(&cache_key).await {
+                    Ok(cached) => {
+                        // Return the cached response
+                        return Ok(cached.response);
+                    }
+                    Err(cache::CacheError::NotFound) | Err(cache::CacheError::Expired) => {
+                        // Cache miss or expired, continue to fetch from API
+                    }
+                    Err(err) => {
+                        // Log cache error but continue with API request
+                        eprintln!("Cache error: {}", err);
+                    }
+                }
+            }
+        }
+        
+        // Cache miss or caching disabled, fetch from API
         let url = self.build_url("latest", &[base_code]);
 
         let mut request_builder = self.http_client.get(&url);
@@ -256,6 +382,17 @@ impl ExchangeRateClient {
             .json::<ExchangeRateResponse>()
             .await
             .map_err(ExchangeRateError::HttpClientError)?;
+            
+        // Store in cache if caching is enabled
+        if self.cache_config.enabled {
+            if let Some(cache) = &self.cache {
+                let cached_response = cache::CachedResponse::new_with_api_expiration(exchange_rate_response.clone());
+                if let Err(err) = cache.set_exchange_rate(&cache_key, cached_response).await {
+                    // Log cache error but continue
+                    eprintln!("Failed to cache response: {}", err);
+                }
+            }
+        }
 
         Ok(exchange_rate_response)
     }
@@ -296,11 +433,41 @@ impl ExchangeRateClient {
         to_currency: &str,
     ) -> Result<f64, ExchangeRateError> {
         // Define the response structure at the beginning of the function
-        #[derive(serde::Deserialize)]
+        #[derive(serde::Deserialize, serde::Serialize, Clone)]
         struct PairConversionResponse {
             conversion_rate: f64,
         }
         
+        // Create a cache key for this request
+        let cache_key = create_cache_key("pair", &[from_currency, to_currency]);
+        
+        // Try to get from cache first if caching is enabled
+        if self.cache_config.enabled {
+            if let Some(cache) = &self.cache {
+                match cache.get_raw(&cache_key).await {
+                    Ok((json, _, _)) => {
+                        // Parse the cached JSON
+                        match serde_json::from_str::<PairConversionResponse>(&json) {
+                            Ok(response) => {
+                                return Ok(response.conversion_rate);
+                            }
+                            Err(err) => {
+                                eprintln!("Failed to parse cached response: {}", err);
+                            }
+                        }
+                    }
+                    Err(cache::CacheError::NotFound) | Err(cache::CacheError::Expired) => {
+                        // Cache miss or expired, continue to fetch from API
+                    }
+                    Err(err) => {
+                        // Log cache error but continue with API request
+                        eprintln!("Cache error: {}", err);
+                    }
+                }
+            }
+        }
+        
+        // Cache miss or caching disabled, fetch from API
         let url = self.build_url("pair", &[from_currency, to_currency]);
 
         let mut request_builder = self.http_client.get(&url);
@@ -328,6 +495,27 @@ impl ExchangeRateClient {
             .json::<PairConversionResponse>()
             .await
             .map_err(ExchangeRateError::HttpClientError)?;
+            
+        // Store in cache if caching is enabled
+        if self.cache_config.enabled {
+            if let Some(cache) = &self.cache {
+                let json = match serde_json::to_string(&pair_response) {
+                    Ok(json) => json,
+                    Err(err) => {
+                        eprintln!("Failed to serialize response: {}", err);
+                        return Ok(pair_response.conversion_rate);
+                    }
+                };
+                
+                let cached_at = chrono::Utc::now();
+                let expires_at = cached_at + self.cache_config.default_ttl;
+                
+                if let Err(err) = cache.set_raw(&cache_key, json, cached_at, expires_at).await {
+                    // Log cache error but continue
+                    eprintln!("Failed to cache response: {}", err);
+                }
+            }
+        }
 
         Ok(pair_response.conversion_rate)
     }
@@ -340,11 +528,53 @@ impl ExchangeRateClient {
     /// or the API returns an error response
     pub async fn get_supported_codes(&self) -> Result<Vec<(String, String)>, ExchangeRateError> {
         // Define the response structure at the beginning of the function
-        #[derive(serde::Deserialize)]
+        #[derive(serde::Deserialize, serde::Serialize, Clone)]
         struct SupportedCodesResponse {
             supported_codes: Vec<Vec<String>>,
         }
         
+        // Create a cache key for this request
+        let cache_key = create_cache_key("codes", &[]);
+        
+        // Try to get from cache first if caching is enabled
+        if self.cache_config.enabled {
+            if let Some(cache) = &self.cache {
+                match cache.get_raw(&cache_key).await {
+                    Ok((json, _, _)) => {
+                        // Parse the cached JSON
+                        match serde_json::from_str::<SupportedCodesResponse>(&json) {
+                            Ok(cached) => {
+                                // Convert the cached nested Vec<Vec<String>> to Vec<(String, String)>
+                                let codes = cached
+                                    .supported_codes
+                                    .into_iter()
+                                    .filter_map(|code_pair| {
+                                        if code_pair.len() >= 2 {
+                                            Some((code_pair[0].clone(), code_pair[1].clone()))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect();
+                                return Ok(codes);
+                            }
+                            Err(err) => {
+                                eprintln!("Failed to parse cached response: {}", err);
+                            }
+                        }
+                    }
+                    Err(cache::CacheError::NotFound) | Err(cache::CacheError::Expired) => {
+                        // Cache miss or expired, continue to fetch from API
+                    }
+                    Err(err) => {
+                        // Log cache error but continue with API request
+                        eprintln!("Cache error: {}", err);
+                    }
+                }
+            }
+        }
+        
+        // Cache miss or caching disabled, fetch from API
         let url = self.build_url("codes", &[]);
 
         let mut request_builder = self.http_client.get(&url);
@@ -372,6 +602,40 @@ impl ExchangeRateClient {
             .json::<SupportedCodesResponse>()
             .await
             .map_err(ExchangeRateError::HttpClientError)?;
+            
+        // Store in cache if caching is enabled
+        if self.cache_config.enabled {
+            if let Some(cache) = &self.cache {
+                let json = match serde_json::to_string(&codes_response) {
+                    Ok(json) => json,
+                    Err(err) => {
+                        eprintln!("Failed to serialize response: {}", err);
+                        // Continue with the conversion without caching
+                        let codes = codes_response
+                            .supported_codes
+                            .into_iter()
+                            .filter_map(|code_pair| {
+                                if code_pair.len() >= 2 {
+                                    Some((code_pair[0].clone(), code_pair[1].clone()))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+                        return Ok(codes);
+                    }
+                };
+                
+                // Currency codes rarely change, so cache for a longer time (1 week)
+                let cached_at = chrono::Utc::now();
+                let expires_at = cached_at + chrono::Duration::weeks(1);
+                
+                if let Err(err) = cache.set_raw(&cache_key, json, cached_at, expires_at).await {
+                    // Log cache error but continue
+                    eprintln!("Failed to cache response: {}", err);
+                }
+            }
+        }
 
         // Convert the nested Vec<Vec<String>> to Vec<(String, String)>
         let codes = codes_response

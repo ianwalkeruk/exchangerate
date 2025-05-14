@@ -1,6 +1,7 @@
 #[cfg(test)]
-use crate::{AuthMethod, ExchangeRateClient};
+use crate::{AuthMethod, ExchangeRateClient, CacheConfig, InMemoryCache, CacheBackend};
 use std::env;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[test]
@@ -10,6 +11,8 @@ fn test_url_construction_in_url_auth() {
         base_url: "https://v6.exchangerate-api.com/v6".to_string(),
         auth_method: AuthMethod::InUrl,
         http_client: reqwest::Client::new(),
+        cache: None,
+        cache_config: CacheConfig::default(),
     };
 
     let url = client.build_url("latest", &["USD"]);
@@ -26,6 +29,8 @@ fn test_url_construction_bearer_token() {
         base_url: "https://v6.exchangerate-api.com/v6".to_string(),
         auth_method: AuthMethod::BearerToken,
         http_client: reqwest::Client::new(),
+        cache: None,
+        cache_config: CacheConfig::default(),
     };
 
     let url = client.build_url("latest", &["USD"]);
@@ -104,4 +109,69 @@ async fn test_bearer_token_auth() {
 
     // Verify we got some rates back
     assert!(!rates.conversion_rates.is_empty());
+}
+
+#[tokio::test]
+async fn test_caching() {
+    // Create a client with caching enabled
+    let cache = Arc::new(InMemoryCache::new());
+    
+    let client = ExchangeRateClient::builder()
+        .api_key("test_key")
+        .with_cache(cache.clone())
+        .build()
+        .unwrap();
+    
+    // Create a mock response
+    use crate::models::ExchangeRateResponse;
+    use std::collections::HashMap;
+    use chrono::Utc;
+    
+    let mut rates = HashMap::new();
+    rates.insert("EUR".to_string(), 0.85);
+    rates.insert("GBP".to_string(), 0.75);
+    
+    let response = ExchangeRateResponse {
+        result: "success".to_string(),
+        documentation: "https://www.exchangerate-api.com/docs".to_string(),
+        terms_of_use: "https://www.exchangerate-api.com/terms".to_string(),
+        time_last_update_unix: 1620000000,
+        time_last_update_utc: "Mon, 03 May 2021 00:00:00 +0000".to_string(),
+        time_next_update_unix: 1620086400,
+        time_next_update_utc: "Tue, 04 May 2021 00:00:00 +0000".to_string(),
+        base_code: "USD".to_string(),
+        conversion_rates: rates,
+    };
+    
+    // Store the response in the cache
+    let cached_response = crate::cache::CachedResponse {
+        response: response.clone(),
+        cached_at: Utc::now(),
+        expires_at: Utc::now() + chrono::Duration::hours(1),
+    };
+    
+    // Create the same cache key that the client will use
+    use crate::cache::create_cache_key;
+    let cache_key = create_cache_key("latest", &["USD"]);
+    
+    // Store in cache
+    cache.set_exchange_rate(&cache_key, cached_response).await.unwrap();
+    
+    // Now try to get the response from the client
+    // This should use the cached response without making an API call
+    let result = client.get_latest_rates("USD").await;
+    
+    // Print the error if there is one
+    if let Err(ref e) = result {
+        println!("Error: {:?}", e);
+    }
+    
+    // Since we're not making a real API call, this would fail if it tried to
+    // but should succeed because it's using the cache
+    assert!(result.is_ok());
+    
+    let retrieved = result.unwrap();
+    assert_eq!(retrieved.base_code, "USD");
+    assert_eq!(retrieved.get_rate("EUR").unwrap(), 0.85);
+    assert_eq!(retrieved.get_rate("GBP").unwrap(), 0.75);
 }

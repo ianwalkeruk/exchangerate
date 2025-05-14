@@ -7,6 +7,7 @@ A Rust client for the [Exchange Rate API](https://www.exchangerate-api.com/) wit
 - **Bearer Token Authentication**: Securely authenticate with your API key in the Authorization header
 - **In-URL Authentication**: Alternative authentication method with API key in the URL
 - **Comprehensive API Coverage**: Access all Exchange Rate API endpoints
+- **Caching Support**: Built-in caching to comply with API terms of use and improve performance
 - **Idiomatic Rust**: Type-safe API with proper error handling
 - **Async/Await**: Built on tokio and reqwest for efficient async operations
 - **Builder Pattern**: Flexible client configuration
@@ -137,12 +138,81 @@ match client.get_latest_rates("USD").await {
 }
 ```
 
+## Caching
+
+The client includes built-in caching to comply with API terms of use and improve performance:
+
+```rust
+use exchangerate_client::{ExchangeRateClient, InMemoryCache};
+use std::sync::Arc;
+
+// Create a client with in-memory caching enabled (default)
+let client = ExchangeRateClient::builder()
+    .api_key(api_key)
+    .build()?;
+
+// Or explicitly configure caching
+let client = ExchangeRateClient::builder()
+    .api_key(api_key)
+    .with_cache(Arc::new(InMemoryCache::new()))
+    .cache_config(CacheConfig {
+        enabled: true,
+        default_ttl: chrono::Duration::hours(2), // Custom TTL
+    })
+    .build()?;
+
+// Disable caching if needed
+let client = ExchangeRateClient::builder()
+    .api_key(api_key)
+    .disable_cache()
+    .build()?;
+```
+
+### Cache Backends
+
+The client supports different cache backends:
+
+#### 1. In-Memory Cache (Default)
+
+```rust
+use exchangerate_client::{ExchangeRateClient, InMemoryCache};
+use std::sync::Arc;
+
+let client = ExchangeRateClient::builder()
+    .api_key(api_key)
+    .with_cache(Arc::new(InMemoryCache::new()))
+    .build()?;
+```
+
+#### 2. SQLite Cache (Optional)
+
+Enable the `sqlite-cache` feature in your Cargo.toml:
+
+```toml
+[dependencies]
+client = { path = "../client", features = ["sqlite-cache"] }
+```
+
+Then use it in your code:
+
+```rust
+use exchangerate_client::{ExchangeRateClient, SqliteCache};
+use std::sync::Arc;
+
+let sqlite_cache = SqliteCache::new("exchange_rates.db")?;
+let client = ExchangeRateClient::builder()
+    .api_key(api_key)
+    .with_cache(Arc::new(sqlite_cache))
+    .build()?;
+```
+
 ## Examples
 
 See the `examples` directory for complete usage examples:
 
 - `basic_usage.rs`: Demonstrates basic client usage with bearer token authentication
 - `in_url_auth.rs`: Shows how to use the alternative in-URL authentication method
+- `caching.rs`: Demonstrates the caching functionality
 
 Run examples with:
 
