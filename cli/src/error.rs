@@ -28,12 +28,14 @@ impl fmt::Display for CliError {
 
 impl std::error::Error for CliError {}
 
-impl From<client::Error> for CliError {
-    fn from(err: client::Error) -> Self {
+impl From<client::ExchangeRateError> for CliError {
+    fn from(err: client::ExchangeRateError) -> Self {
         match err {
-            client::Error::ApiError(msg) => CliError::ApiError(msg),
-            client::Error::InvalidCurrency(code) => CliError::InvalidCurrency(code),
-            client::Error::NetworkError(msg) => CliError::NetworkError(msg),
+            client::ExchangeRateError::MissingApiKey => CliError::MissingApiKey,
+            client::ExchangeRateError::UnsupportedCode => CliError::InvalidCurrency("Unsupported currency code".to_string()),
+            client::ExchangeRateError::InvalidKey => CliError::ApiError("Invalid API key".to_string()),
+            client::ExchangeRateError::HttpClientError(e) => CliError::NetworkError(e.to_string()),
+            client::ExchangeRateError::HttpError(status) => CliError::NetworkError(format!("HTTP error: {}", status)),
             _ => CliError::UnexpectedError(err.to_string()),
         }
     }

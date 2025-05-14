@@ -1,9 +1,10 @@
-use anyhow::Result;
 use client::ExchangeRateResponse;
 use colored::Colorize;
-use prettytable::{Cell, Row, Table, format};
+use prettytable::{format, Cell, Row, Table};
 use serde_json::json;
 use std::collections::HashMap;
+
+use crate::error::CliError;
 
 pub enum OutputFormat {
     Text,
@@ -11,12 +12,15 @@ pub enum OutputFormat {
     Csv,
 }
 
-impl From<&str> for OutputFormat {
-    fn from(s: &str) -> Self {
+impl TryFrom<&str> for OutputFormat {
+    type Error = CliError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s.to_lowercase().as_str() {
-            "json" => OutputFormat::Json,
-            "csv" => OutputFormat::Csv,
-            _ => OutputFormat::Text,
+            "text" => Ok(OutputFormat::Text),
+            "json" => Ok(OutputFormat::Json),
+            "csv" => Ok(OutputFormat::Csv),
+            _ => Err(CliError::InvalidFormat(s.to_string())),
         }
     }
 }
@@ -24,8 +28,11 @@ impl From<&str> for OutputFormat {
 pub fn format_latest_rates(
     response: &ExchangeRateResponse,
     format: Option<&str>,
-) -> Result<String> {
-    let format = format.map(OutputFormat::from).unwrap_or(OutputFormat::Text);
+) -> Result<String, CliError> {
+    let format = match format {
+        Some(fmt) => OutputFormat::try_from(fmt)?,
+        None => OutputFormat::Text,
+    };
 
     match format {
         OutputFormat::Text => format_latest_rates_text(response),
@@ -34,7 +41,7 @@ pub fn format_latest_rates(
     }
 }
 
-fn format_latest_rates_text(response: &ExchangeRateResponse) -> Result<String> {
+fn format_latest_rates_text(response: &ExchangeRateResponse) -> Result<String, CliError> {
     let mut output = String::new();
 
     // Header
@@ -88,7 +95,7 @@ fn format_latest_rates_text(response: &ExchangeRateResponse) -> Result<String> {
     Ok(output)
 }
 
-fn format_latest_rates_json(response: &ExchangeRateResponse) -> Result<String> {
+fn format_latest_rates_json(response: &ExchangeRateResponse) -> Result<String, CliError> {
     let json = json!({
         "base_currency": response.base_code,
         "last_updated": response.time_last_update_utc,
@@ -99,7 +106,7 @@ fn format_latest_rates_json(response: &ExchangeRateResponse) -> Result<String> {
     Ok(serde_json::to_string_pretty(&json)?)
 }
 
-fn format_latest_rates_csv(response: &ExchangeRateResponse) -> Result<String> {
+fn format_latest_rates_csv(response: &ExchangeRateResponse) -> Result<String, CliError> {
     let mut output = String::new();
 
     // Header
@@ -123,8 +130,11 @@ pub fn format_conversion(
     converted_amount: f64,
     rate: f64,
     format: Option<&str>,
-) -> Result<String> {
-    let format = format.map(OutputFormat::from).unwrap_or(OutputFormat::Text);
+) -> Result<String, CliError> {
+    let format = match format {
+        Some(fmt) => OutputFormat::try_from(fmt)?,
+        None => OutputFormat::Text,
+    };
 
     match format {
         OutputFormat::Text => {
@@ -145,7 +155,7 @@ fn format_conversion_text(
     to_currency: &str,
     converted_amount: f64,
     rate: f64,
-) -> Result<String> {
+) -> Result<String, CliError> {
     let mut output = String::new();
 
     output.push_str(&format!(
@@ -173,7 +183,7 @@ fn format_conversion_json(
     to_currency: &str,
     converted_amount: f64,
     rate: f64,
-) -> Result<String> {
+) -> Result<String, CliError> {
     let json = json!({
         "amount": amount,
         "from_currency": from_currency,
@@ -191,7 +201,7 @@ fn format_conversion_csv(
     to_currency: &str,
     converted_amount: f64,
     rate: f64,
-) -> Result<String> {
+) -> Result<String, CliError> {
     let mut output = String::new();
 
     // Header
@@ -211,8 +221,11 @@ pub fn format_pair_rate(
     to_currency: &str,
     rate: f64,
     format: Option<&str>,
-) -> Result<String> {
-    let format = format.map(OutputFormat::from).unwrap_or(OutputFormat::Text);
+) -> Result<String, CliError> {
+    let format = match format {
+        Some(fmt) => OutputFormat::try_from(fmt)?,
+        None => OutputFormat::Text,
+    };
 
     match format {
         OutputFormat::Text => format_pair_rate_text(from_currency, to_currency, rate),
@@ -221,7 +234,7 @@ pub fn format_pair_rate(
     }
 }
 
-fn format_pair_rate_text(from_currency: &str, to_currency: &str, rate: f64) -> Result<String> {
+fn format_pair_rate_text(from_currency: &str, to_currency: &str, rate: f64) -> Result<String, CliError> {
     let mut output = String::new();
 
     output.push_str(&format!(
@@ -235,7 +248,7 @@ fn format_pair_rate_text(from_currency: &str, to_currency: &str, rate: f64) -> R
     Ok(output)
 }
 
-fn format_pair_rate_json(from_currency: &str, to_currency: &str, rate: f64) -> Result<String> {
+fn format_pair_rate_json(from_currency: &str, to_currency: &str, rate: f64) -> Result<String, CliError> {
     let json = json!({
         "from_currency": from_currency,
         "to_currency": to_currency,
@@ -245,7 +258,7 @@ fn format_pair_rate_json(from_currency: &str, to_currency: &str, rate: f64) -> R
     Ok(serde_json::to_string_pretty(&json)?)
 }
 
-fn format_pair_rate_csv(from_currency: &str, to_currency: &str, rate: f64) -> Result<String> {
+fn format_pair_rate_csv(from_currency: &str, to_currency: &str, rate: f64) -> Result<String, CliError> {
     let mut output = String::new();
 
     // Header
@@ -257,8 +270,11 @@ fn format_pair_rate_csv(from_currency: &str, to_currency: &str, rate: f64) -> Re
     Ok(output)
 }
 
-pub fn format_currency_codes(codes: &[(String, String)], format: Option<&str>) -> Result<String> {
-    let format = format.map(OutputFormat::from).unwrap_or(OutputFormat::Text);
+pub fn format_currency_codes(codes: &[(String, String)], format: Option<&str>) -> Result<String, CliError> {
+    let format = match format {
+        Some(fmt) => OutputFormat::try_from(fmt)?,
+        None => OutputFormat::Text,
+    };
 
     match format {
         OutputFormat::Text => format_currency_codes_text(codes),
@@ -267,7 +283,7 @@ pub fn format_currency_codes(codes: &[(String, String)], format: Option<&str>) -
     }
 }
 
-fn format_currency_codes_text(codes: &[(String, String)]) -> Result<String> {
+fn format_currency_codes_text(codes: &[(String, String)]) -> Result<String, CliError> {
     let mut output = String::new();
 
     // Header
@@ -302,7 +318,7 @@ fn format_currency_codes_text(codes: &[(String, String)]) -> Result<String> {
     Ok(output)
 }
 
-fn format_currency_codes_json(codes: &[(String, String)]) -> Result<String> {
+fn format_currency_codes_json(codes: &[(String, String)]) -> Result<String, CliError> {
     let mut map = HashMap::new();
     for (code, name) in codes {
         map.insert(code, name);
@@ -316,7 +332,7 @@ fn format_currency_codes_json(codes: &[(String, String)]) -> Result<String> {
     Ok(serde_json::to_string_pretty(&json)?)
 }
 
-fn format_currency_codes_csv(codes: &[(String, String)]) -> Result<String> {
+fn format_currency_codes_csv(codes: &[(String, String)]) -> Result<String, CliError> {
     let mut output = String::new();
 
     // Header

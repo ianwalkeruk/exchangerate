@@ -21,7 +21,7 @@ use error::CliError;
 )]
 struct Cli {
     /// API key for the Exchange Rate API (can also be set via EXCHANGE_RATE_API_KEY env var)
-    #[arg(long, env = "EXCHANGE_RATE_API_KEY", hide_env_values = true)]
+    #[arg(long, value_name = "API_KEY")]
     api_key: Option<String>,
 
     /// Authentication method (bearer or url)
