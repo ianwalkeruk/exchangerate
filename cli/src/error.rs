@@ -15,6 +15,10 @@ pub enum CliError {
     NetworkError(String),
     /// Unexpected error that doesn't fit other categories
     UnexpectedError(String),
+    /// Invalid configuration key
+    InvalidConfigKey(String),
+    /// Invalid configuration value
+    InvalidConfigValue(String),
 }
 
 impl fmt::Display for CliError {
@@ -49,6 +53,8 @@ impl fmt::Display for CliError {
                 "Unexpected Error: {}. Please report this issue if it persists.",
                 msg
             ),
+            CliError::InvalidConfigKey(key) => write!(f, "Invalid configuration key: {}", key),
+            CliError::InvalidConfigValue(msg) => write!(f, "Invalid configuration value: {}", msg),
         }
     }
 }
