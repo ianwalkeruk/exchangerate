@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::{AuthMethod, ExchangeRateClient, ExchangeRateError};
+    use crate::{AuthMethod, ExchangeRateClient};
     use std::env;
     use std::time::Duration;
 

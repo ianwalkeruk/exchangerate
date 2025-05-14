@@ -107,7 +107,7 @@ mod tests {
             response
                 .convert(100.0, "EUR", "JPY")
                 .map(|v| (v * 100.0).round() / 100.0),
-            Some(164.80)
+            Some(16480.08)
         );
     }
 }
