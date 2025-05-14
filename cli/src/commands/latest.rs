@@ -1,13 +1,17 @@
-use anyhow::Result;
 use client::ExchangeRateClient;
 
+use crate::error::CliError;
 use crate::formatters;
+use crate::utils;
 
 pub async fn execute(
     client: &ExchangeRateClient,
     base_currency: &str,
     format: Option<&str>,
-) -> Result<()> {
+) -> Result<(), CliError> {
+    // Validate currency code
+    utils::validate_currency_code(base_currency)?;
+
     // Get latest rates
     let rates = client.get_latest_rates(base_currency).await?;
 

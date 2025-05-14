@@ -1,10 +1,15 @@
-use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use client::ExchangeRateClient;
+use colored::Colorize;
 use std::env;
+use std::process;
 
 mod commands;
+mod error;
 mod formatters;
+mod utils;
+
+use error::CliError;
 
 #[derive(Parser)]
 #[command(
@@ -73,14 +78,26 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     let cli = Cli::parse();
 
+    // Configure colored output
+    if cli.no_color {
+        colored::control::set_override(false);
+    }
+
+    // Run the CLI and handle errors
+    if let Err(err) = run(cli).await {
+        eprintln!("{} {}", "Error:".bold().red(), err);
+        process::exit(1);
+    }
+}
+
+async fn run(cli: Cli) -> Result<(), CliError> {
     // Get API key from args or environment
     let api_key = match cli.api_key {
         Some(key) => key,
-        None => env::var("EXCHANGE_RATE_API_KEY")
-            .context("API key not provided. Use --api-key option or set EXCHANGE_RATE_API_KEY environment variable")?,
+        None => env::var("EXCHANGE_RATE_API_KEY")?,
     };
 
     // Create client builder
@@ -93,7 +110,8 @@ async fn main() -> Result<()> {
             "url" => client::AuthMethod::InUrl,
             _ => {
                 eprintln!(
-                    "Invalid auth method: {}. Using default (bearer).",
+                    "{} Invalid auth method: {}. Using default (bearer).",
+                    "Warning:".bold().yellow(),
                     auth_method_str
                 );
                 client::AuthMethod::BearerToken
@@ -108,12 +126,7 @@ async fn main() -> Result<()> {
     }
 
     // Build the client
-    let client = client_builder.build()?;
-
-    // Configure colored output
-    if cli.no_color {
-        colored::control::set_override(false);
-    }
+    let client = client_builder.build().map_err(|e| CliError::from(e))?;
 
     // Execute the requested command
     match cli.command {
