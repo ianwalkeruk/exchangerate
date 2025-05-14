@@ -55,3 +55,122 @@ pub enum ExchangeRateError {
     #[error("JSON parsing error: {0}")]
     JsonError(#[from] serde_json::Error),
 }
+
+/// # Exchange Rate API Client
+///
+/// A Rust client for the Exchange Rate API (https://www.exchangerate-api.com/)
+///
+/// ## Authentication
+///
+/// This client supports two authentication methods:
+///
+/// 1. **Bearer Token Authentication (Default, More Secure)**
+///    - API key is passed in the Authorization header
+///    - Prevents API key from appearing in logs or browser history
+///
+/// 2. **In-URL Authentication**
+///    - API key is included directly in the URL
+///    - Simpler but less secure as the API key may appear in logs
+///
+/// ## Security Considerations
+///
+/// - Never hardcode your API key in source code
+/// - Use environment variables or secure configuration management
+/// - All requests use HTTPS to ensure encrypted communication
+///
+/// ## Example
+///
+/// ```rust,no_run
+/// use client::{ExchangeRateClient, AuthMethod};
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     // Create a client with bearer token authentication (default)
+///     let client = ExchangeRateClient::builder()
+///         .api_key(std::env::var("EXCHANGE_RATE_API_KEY")?)
+///         .build()?;
+///
+///     // Get latest rates with USD as base currency
+///     let rates = client.get_latest_rates("USD").await?;
+///     
+///     // Convert 100 USD to EUR
+///     let amount_in_eur = rates.convert_from_base(100.0, "EUR").unwrap();
+///     println!("100 USD = {} EUR", amount_in_eur);
+///
+///     Ok(())
+/// }
+/// ```
+pub struct ExchangeRateClient {
+    api_key: String,
+    base_url: String,
+    auth_method: AuthMethod,
+    http_client: reqwest::Client,
+}
+
+/// Builder for creating an ExchangeRateClient with custom configuration
+pub struct ExchangeRateClientBuilder {
+    api_key: Option<String>,
+    base_url: Option<String>,
+    auth_method: AuthMethod,
+    timeout: Option<Duration>,
+}
+
+impl ExchangeRateClientBuilder {
+    /// Create a new builder with default settings
+    pub fn new() -> Self {
+        Self {
+            api_key: None,
+            base_url: Some("https://v6.exchangerate-api.com/v6".to_string()),
+            auth_method: AuthMethod::BearerToken, // Default to more secure method
+            timeout: Some(Duration::from_secs(30)),
+        }
+    }
+
+    /// Set the API key for authentication
+    pub fn api_key(mut self, api_key: impl Into<String>) -> Self {
+        self.api_key = Some(api_key.into());
+        self
+    }
+
+    /// Set the authentication method
+    pub fn auth_method(mut self, auth_method: AuthMethod) -> Self {
+        self.auth_method = auth_method;
+        self
+    }
+
+    /// Set a custom base URL (useful for testing or if the API URL changes)
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = Some(base_url.into());
+        self
+    }
+
+    /// Set a custom timeout for HTTP requests
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// Build the client with the configured settings
+    pub fn build(self) -> Result<ExchangeRateClient, ExchangeRateError> {
+        let api_key = self.api_key.ok_or(ExchangeRateError::MissingApiKey)?;
+
+        // Create HTTP client with appropriate timeout
+        let mut client_builder = reqwest::Client::builder();
+        if let Some(timeout) = self.timeout {
+            client_builder = client_builder.timeout(timeout);
+        }
+
+        let http_client = client_builder
+            .build()
+            .map_err(ExchangeRateError::HttpClientError)?;
+
+        Ok(ExchangeRateClient {
+            api_key,
+            base_url: self
+                .base_url
+                .unwrap_or_else(|| "https://v6.exchangerate-api.com/v6".to_string()),
+            auth_method: self.auth_method,
+            http_client,
+        })
+    }
+}
