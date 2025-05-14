@@ -1,10 +1,10 @@
-mod models;
 mod cache;
+mod models;
 #[cfg(test)]
 mod tests;
 
-pub use models::{CurrencyCode, ExchangeRateResponse};
 pub use cache::{CacheBackend, CacheConfig, CachedResponse, InMemoryCache};
+pub use models::{CurrencyCode, ExchangeRateResponse};
 
 #[cfg(feature = "sqlite-cache")]
 pub use cache::sqlite::SqliteCache;
@@ -63,7 +63,7 @@ pub enum ExchangeRateError {
 
     #[error("JSON parsing error: {0}")]
     JsonError(#[from] serde_json::Error),
-    
+
     /// A cache error occurred
     #[error("Cache error: {0}")]
     CacheError(#[from] cache::CacheError),
@@ -179,15 +179,15 @@ impl ExchangeRateClientBuilder {
         self.timeout = Some(timeout);
         self
     }
-    
+
     /// Set a cache backend for the client
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```no_run
     /// use client::{ExchangeRateClient, InMemoryCache};
     /// use std::sync::Arc;
-    /// 
+    ///
     /// let client = ExchangeRateClient::builder()
     ///     .api_key("your-api-key")
     ///     .with_cache(Arc::new(InMemoryCache::new()))
@@ -199,20 +199,20 @@ impl ExchangeRateClientBuilder {
         self.cache = Some(cache);
         self
     }
-    
+
     /// Set cache configuration options
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```no_run
     /// use client::{ExchangeRateClient, CacheConfig};
     /// use chrono::Duration;
-    /// 
+    ///
     /// let cache_config = CacheConfig {
     ///     enabled: true,
     ///     default_ttl: Duration::hours(12),
     /// };
-    /// 
+    ///
     /// let client = ExchangeRateClient::builder()
     ///     .api_key("your-api-key")
     ///     .cache_config(cache_config)
@@ -224,14 +224,14 @@ impl ExchangeRateClientBuilder {
         self.cache_config = config;
         self
     }
-    
+
     /// Disable caching
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```no_run
     /// use client::ExchangeRateClient;
-    /// 
+    ///
     /// let client = ExchangeRateClient::builder()
     ///     .api_key("your-api-key")
     ///     .disable_cache()
@@ -271,7 +271,7 @@ impl ExchangeRateClientBuilder {
                     {
                         Some(Arc::new(InMemoryCache::new()) as Arc<dyn CacheBackend>)
                     }
-                    
+
                     #[cfg(not(feature = "in-memory-cache"))]
                     {
                         None
@@ -281,7 +281,7 @@ impl ExchangeRateClientBuilder {
         } else {
             None
         };
-        
+
         Ok(ExchangeRateClient {
             api_key,
             base_url: self
@@ -334,7 +334,7 @@ impl ExchangeRateClient {
     ) -> Result<ExchangeRateResponse, ExchangeRateError> {
         // Create a cache key for this request
         let cache_key = create_cache_key("latest", &[base_code]);
-        
+
         // Try to get from cache first if caching is enabled
         if self.cache_config.enabled {
             if let Some(cache) = &self.cache {
@@ -353,7 +353,7 @@ impl ExchangeRateClient {
                 }
             }
         }
-        
+
         // Cache miss or caching disabled, fetch from API
         let url = self.build_url("latest", &[base_code]);
 
@@ -382,11 +382,12 @@ impl ExchangeRateClient {
             .json::<ExchangeRateResponse>()
             .await
             .map_err(ExchangeRateError::HttpClientError)?;
-            
+
         // Store in cache if caching is enabled
         if self.cache_config.enabled {
             if let Some(cache) = &self.cache {
-                let cached_response = cache::CachedResponse::new_with_api_expiration(exchange_rate_response.clone());
+                let cached_response =
+                    cache::CachedResponse::new_with_api_expiration(exchange_rate_response.clone());
                 if let Err(err) = cache.set_exchange_rate(&cache_key, cached_response).await {
                     // Log cache error but continue
                     eprintln!("Failed to cache response: {}", err);
@@ -437,10 +438,10 @@ impl ExchangeRateClient {
         struct PairConversionResponse {
             conversion_rate: f64,
         }
-        
+
         // Create a cache key for this request
         let cache_key = create_cache_key("pair", &[from_currency, to_currency]);
-        
+
         // Try to get from cache first if caching is enabled
         if self.cache_config.enabled {
             if let Some(cache) = &self.cache {
@@ -466,7 +467,7 @@ impl ExchangeRateClient {
                 }
             }
         }
-        
+
         // Cache miss or caching disabled, fetch from API
         let url = self.build_url("pair", &[from_currency, to_currency]);
 
@@ -495,7 +496,7 @@ impl ExchangeRateClient {
             .json::<PairConversionResponse>()
             .await
             .map_err(ExchangeRateError::HttpClientError)?;
-            
+
         // Store in cache if caching is enabled
         if self.cache_config.enabled {
             if let Some(cache) = &self.cache {
@@ -506,10 +507,10 @@ impl ExchangeRateClient {
                         return Ok(pair_response.conversion_rate);
                     }
                 };
-                
+
                 let cached_at = chrono::Utc::now();
                 let expires_at = cached_at + self.cache_config.default_ttl;
-                
+
                 if let Err(err) = cache.set_raw(&cache_key, json, cached_at, expires_at).await {
                     // Log cache error but continue
                     eprintln!("Failed to cache response: {}", err);
@@ -532,10 +533,10 @@ impl ExchangeRateClient {
         struct SupportedCodesResponse {
             supported_codes: Vec<Vec<String>>,
         }
-        
+
         // Create a cache key for this request
         let cache_key = create_cache_key("codes", &[]);
-        
+
         // Try to get from cache first if caching is enabled
         if self.cache_config.enabled {
             if let Some(cache) = &self.cache {
@@ -573,7 +574,7 @@ impl ExchangeRateClient {
                 }
             }
         }
-        
+
         // Cache miss or caching disabled, fetch from API
         let url = self.build_url("codes", &[]);
 
@@ -602,7 +603,7 @@ impl ExchangeRateClient {
             .json::<SupportedCodesResponse>()
             .await
             .map_err(ExchangeRateError::HttpClientError)?;
-            
+
         // Store in cache if caching is enabled
         if self.cache_config.enabled {
             if let Some(cache) = &self.cache {
@@ -625,11 +626,11 @@ impl ExchangeRateClient {
                         return Ok(codes);
                     }
                 };
-                
+
                 // Currency codes rarely change, so cache for a longer time (1 week)
                 let cached_at = chrono::Utc::now();
                 let expires_at = cached_at + chrono::Duration::weeks(1);
-                
+
                 if let Err(err) = cache.set_raw(&cache_key, json, cached_at, expires_at).await {
                     // Log cache error but continue
                     eprintln!("Failed to cache response: {}", err);
