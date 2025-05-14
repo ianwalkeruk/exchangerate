@@ -1,4 +1,6 @@
 mod models;
+#[cfg(test)]
+mod tests;
 
 pub use models::{CurrencyCode, ExchangeRateResponse};
 
