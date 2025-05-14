@@ -1,4 +1,4 @@
-use client::{AuthMethod, ExchangeRateClient};
+use client::ExchangeRateClient;
 use std::env;
 
 #[tokio::main]
@@ -35,14 +35,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let from_currency = "USD";
     let to_currency = "EUR";
     
-    println!("\nConverting {:.2} {} to {}...", amount, from_currency, to_currency);
+    println!("\nConverting {amount:.2} {from_currency} to {to_currency}...");
     let converted = client.convert(amount, from_currency, to_currency).await?;
-    println!("{:.2} {} = {:.2} {}", amount, from_currency, converted, to_currency);
+    println!("{amount:.2} {from_currency} = {converted:.2} {to_currency}");
     
     // Get direct pair conversion rate
     println!("\nGetting direct pair conversion rate from GBP to JPY...");
     let rate = client.get_pair_conversion("GBP", "JPY").await?;
-    println!("1 GBP = {:.4} JPY", rate);
+    println!("1 GBP = {rate:.4} JPY");
     
     // Get supported currencies
     println!("\nFetching supported currencies...");

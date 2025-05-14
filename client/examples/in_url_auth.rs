@@ -36,9 +36,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let from_currency = "EUR";
     let to_currency = "USD";
     
-    println!("\nConverting {:.2} {} to {}...", amount, from_currency, to_currency);
+    println!("\nConverting {amount:.2} {from_currency} to {to_currency}...");
     let converted = client.convert(amount, from_currency, to_currency).await?;
-    println!("{:.2} {} = {:.2} {}", amount, from_currency, converted, to_currency);
+    println!("{amount:.2} {from_currency} = {converted:.2} {to_currency}");
     
     Ok(())
 }

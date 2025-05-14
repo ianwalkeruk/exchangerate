@@ -11,11 +11,11 @@ use thiserror::Error;
 #[derive(Debug, Clone, Copy)]
 pub enum AuthMethod {
     /// API key is included in the URL (less secure but simpler)
-    /// Example: https://v6.exchangerate-api.com/v6/YOUR-API-KEY/latest/USD
+    /// Example: <https://v6.exchangerate-api.com/v6/YOUR-API-KEY/latest/USD>
     InUrl,
 
     /// API key is passed as a bearer token in the Authorization header (more secure)
-    /// Example: GET https://v6.exchangerate-api.com/v6/latest/USD
+    /// Example: GET <https://v6.exchangerate-api.com/v6/latest/USD>
     /// With header: Authorization: Bearer YOUR-API-KEY
     BearerToken,
 }
@@ -60,7 +60,7 @@ pub enum ExchangeRateError {
 
 /// # Exchange Rate API Client
 ///
-/// A Rust client for the Exchange Rate API (https://www.exchangerate-api.com/)
+/// A Rust client for the Exchange Rate API (<https://www.exchangerate-api.com/>)
 ///
 /// ## Authentication
 ///
@@ -109,7 +109,7 @@ pub struct ExchangeRateClient {
     http_client: reqwest::Client,
 }
 
-/// Builder for creating an ExchangeRateClient with custom configuration
+/// Builder for creating an `ExchangeRateClient` with custom configuration
 pub struct ExchangeRateClientBuilder {
     api_key: Option<String>,
     base_url: Option<String>,
@@ -117,8 +117,15 @@ pub struct ExchangeRateClientBuilder {
     timeout: Option<Duration>,
 }
 
+impl Default for ExchangeRateClientBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExchangeRateClientBuilder {
     /// Create a new builder with default settings
+    #[must_use]
     pub fn new() -> Self {
         Self {
             api_key: None,
@@ -129,30 +136,38 @@ impl ExchangeRateClientBuilder {
     }
 
     /// Set the API key for authentication
+    #[must_use]
     pub fn api_key(mut self, api_key: impl Into<String>) -> Self {
         self.api_key = Some(api_key.into());
         self
     }
 
     /// Set the authentication method
-    pub fn auth_method(mut self, auth_method: AuthMethod) -> Self {
+    #[must_use]
+    pub const fn auth_method(mut self, auth_method: AuthMethod) -> Self {
         self.auth_method = auth_method;
         self
     }
 
     /// Set a custom base URL (useful for testing or if the API URL changes)
+    #[must_use]
     pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = Some(base_url.into());
         self
     }
 
     /// Set a custom timeout for HTTP requests
-    pub fn timeout(mut self, timeout: Duration) -> Self {
+    #[must_use]
+    pub const fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
     /// Build the client with the configured settings
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API key is not provided or if the HTTP client cannot be created
     pub fn build(self) -> Result<ExchangeRateClient, ExchangeRateError> {
         let api_key = self.api_key.ok_or(ExchangeRateError::MissingApiKey)?;
 
@@ -179,6 +194,7 @@ impl ExchangeRateClientBuilder {
 
 impl ExchangeRateClient {
     /// Creates a new client builder
+    #[must_use]
     pub fn builder() -> ExchangeRateClientBuilder {
         ExchangeRateClientBuilder::new()
     }
@@ -204,6 +220,11 @@ impl ExchangeRateClient {
     }
 
     /// Get latest exchange rates for a base currency
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API request fails, the response cannot be parsed,
+    /// or the API returns an error response
     pub async fn get_latest_rates(
         &self,
         base_code: &str,
@@ -240,6 +261,11 @@ impl ExchangeRateClient {
     }
 
     /// Convert an amount from one currency to another
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API request fails, the response cannot be parsed,
+    /// the API returns an error response, or if the target currency is not supported
     pub async fn convert(
         &self,
         amount: f64,
@@ -259,11 +285,22 @@ impl ExchangeRateClient {
     }
 
     /// Get pair conversion rate (direct conversion between two currencies)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API request fails, the response cannot be parsed,
+    /// or the API returns an error response
     pub async fn get_pair_conversion(
         &self,
         from_currency: &str,
         to_currency: &str,
     ) -> Result<f64, ExchangeRateError> {
+        // Define the response structure at the beginning of the function
+        #[derive(serde::Deserialize)]
+        struct PairConversionResponse {
+            conversion_rate: f64,
+        }
+        
         let url = self.build_url("pair", &[from_currency, to_currency]);
 
         let mut request_builder = self.http_client.get(&url);
@@ -287,11 +324,6 @@ impl ExchangeRateClient {
         }
 
         // Parse the response to get the conversion rate
-        #[derive(serde::Deserialize)]
-        struct PairConversionResponse {
-            conversion_rate: f64,
-        }
-
         let pair_response = response
             .json::<PairConversionResponse>()
             .await
@@ -301,7 +333,18 @@ impl ExchangeRateClient {
     }
 
     /// Get supported currency codes
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API request fails, the response cannot be parsed,
+    /// or the API returns an error response
     pub async fn get_supported_codes(&self) -> Result<Vec<(String, String)>, ExchangeRateError> {
+        // Define the response structure at the beginning of the function
+        #[derive(serde::Deserialize)]
+        struct SupportedCodesResponse {
+            supported_codes: Vec<Vec<String>>,
+        }
+        
         let url = self.build_url("codes", &[]);
 
         let mut request_builder = self.http_client.get(&url);
@@ -325,11 +368,6 @@ impl ExchangeRateClient {
         }
 
         // Parse the response to get the supported codes
-        #[derive(serde::Deserialize)]
-        struct SupportedCodesResponse {
-            supported_codes: Vec<Vec<String>>,
-        }
-
         let codes_response = response
             .json::<SupportedCodesResponse>()
             .await

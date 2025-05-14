@@ -42,19 +42,22 @@ pub struct ExchangeRateResponse {
 /// Currency code type alias for better readability
 pub type CurrencyCode = String;
 
-/// Extension methods for ExchangeRateResponse
+/// Extension methods for `ExchangeRateResponse`
 impl ExchangeRateResponse {
     /// Get the exchange rate for a specific currency
+    #[must_use]
     pub fn get_rate(&self, currency_code: &str) -> Option<f64> {
         self.conversion_rates.get(currency_code).copied()
     }
 
     /// Convert an amount from the base currency to another currency
+    #[must_use]
     pub fn convert_from_base(&self, amount: f64, to_currency: &str) -> Option<f64> {
         self.get_rate(to_currency).map(|rate| amount * rate)
     }
 
     /// Convert an amount from one currency to another
+    #[must_use]
     pub fn convert(&self, amount: f64, from_currency: &str, to_currency: &str) -> Option<f64> {
         if from_currency == self.base_code {
             return self.convert_from_base(amount, to_currency);
