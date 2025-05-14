@@ -174,3 +174,178 @@ impl ExchangeRateClientBuilder {
         })
     }
 }
+
+impl ExchangeRateClient {
+    /// Creates a new client builder
+    pub fn builder() -> ExchangeRateClientBuilder {
+        ExchangeRateClientBuilder::new()
+    }
+
+    /// Constructs the appropriate URL based on the authentication method
+    fn build_url(&self, endpoint: &str, params: &[&str]) -> String {
+        match self.auth_method {
+            AuthMethod::InUrl => {
+                // Include API key in URL
+                format!(
+                    "{}/{}/{}/{}",
+                    self.base_url,
+                    self.api_key,
+                    endpoint,
+                    params.join("/")
+                )
+            }
+            AuthMethod::BearerToken => {
+                // Omit API key from URL
+                format!("{}/{}/{}", self.base_url, endpoint, params.join("/"))
+            }
+        }
+    }
+
+    /// Get latest exchange rates for a base currency
+    pub async fn get_latest_rates(
+        &self,
+        base_code: &str,
+    ) -> Result<ExchangeRateResponse, ExchangeRateError> {
+        let url = self.build_url("latest", &[base_code]);
+
+        let mut request_builder = self.http_client.get(&url);
+
+        // Add authorization header if using bearer token auth
+        if let AuthMethod::BearerToken = self.auth_method {
+            request_builder = request_builder.header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", self.api_key),
+            );
+        }
+
+        let response = request_builder
+            .send()
+            .await
+            .map_err(ExchangeRateError::HttpClientError)?;
+
+        // Check for HTTP errors
+        if !response.status().is_success() {
+            return Err(ExchangeRateError::HttpError(response.status()));
+        }
+
+        // Parse the response
+        let exchange_rate_response = response
+            .json::<ExchangeRateResponse>()
+            .await
+            .map_err(ExchangeRateError::HttpClientError)?;
+
+        Ok(exchange_rate_response)
+    }
+
+    /// Convert an amount from one currency to another
+    pub async fn convert(
+        &self,
+        amount: f64,
+        from_currency: &str,
+        to_currency: &str,
+    ) -> Result<f64, ExchangeRateError> {
+        // Get the latest rates with from_currency as base
+        let rates = self.get_latest_rates(from_currency).await?;
+
+        // Get the conversion rate for to_currency
+        let rate = rates
+            .get_rate(to_currency)
+            .ok_or(ExchangeRateError::UnsupportedCode)?;
+
+        // Calculate the converted amount
+        Ok(amount * rate)
+    }
+
+    /// Get pair conversion rate (direct conversion between two currencies)
+    pub async fn get_pair_conversion(
+        &self,
+        from_currency: &str,
+        to_currency: &str,
+    ) -> Result<f64, ExchangeRateError> {
+        let url = self.build_url("pair", &[from_currency, to_currency]);
+
+        let mut request_builder = self.http_client.get(&url);
+
+        // Add authorization header if using bearer token auth
+        if let AuthMethod::BearerToken = self.auth_method {
+            request_builder = request_builder.header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", self.api_key),
+            );
+        }
+
+        let response = request_builder
+            .send()
+            .await
+            .map_err(ExchangeRateError::HttpClientError)?;
+
+        // Check for HTTP errors
+        if !response.status().is_success() {
+            return Err(ExchangeRateError::HttpError(response.status()));
+        }
+
+        // Parse the response to get the conversion rate
+        #[derive(serde::Deserialize)]
+        struct PairConversionResponse {
+            conversion_rate: f64,
+        }
+
+        let pair_response = response
+            .json::<PairConversionResponse>()
+            .await
+            .map_err(ExchangeRateError::HttpClientError)?;
+
+        Ok(pair_response.conversion_rate)
+    }
+
+    /// Get supported currency codes
+    pub async fn get_supported_codes(&self) -> Result<Vec<(String, String)>, ExchangeRateError> {
+        let url = self.build_url("codes", &[]);
+
+        let mut request_builder = self.http_client.get(&url);
+
+        // Add authorization header if using bearer token auth
+        if let AuthMethod::BearerToken = self.auth_method {
+            request_builder = request_builder.header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", self.api_key),
+            );
+        }
+
+        let response = request_builder
+            .send()
+            .await
+            .map_err(ExchangeRateError::HttpClientError)?;
+
+        // Check for HTTP errors
+        if !response.status().is_success() {
+            return Err(ExchangeRateError::HttpError(response.status()));
+        }
+
+        // Parse the response to get the supported codes
+        #[derive(serde::Deserialize)]
+        struct SupportedCodesResponse {
+            supported_codes: Vec<Vec<String>>,
+        }
+
+        let codes_response = response
+            .json::<SupportedCodesResponse>()
+            .await
+            .map_err(ExchangeRateError::HttpClientError)?;
+
+        // Convert the nested Vec<Vec<String>> to Vec<(String, String)>
+        let codes = codes_response
+            .supported_codes
+            .into_iter()
+            .filter_map(|code_pair| {
+                if code_pair.len() >= 2 {
+                    Some((code_pair[0].clone(), code_pair[1].clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(codes)
+    }
+}
